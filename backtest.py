@@ -392,8 +392,8 @@ def full_gridsearch(trade_logs, start_str, end_str):
                 print(f"{i}: liq_candle_time={log.get('liq_candle_time')}, trend_1h={log.get('trend_1h')}, status={log.get('status')}")
 
 if __name__ == "__main__":
-    start_str = "2025-08-01 00:00:00"
-    end_str   = "2025-08-11 00:00:00"
+    start_str = "2025-10-01 00:00:00"
+    end_str   = "2025-10-08 00:00:00"
     chunk_list = get_chunks(start_str, end_str, chunk_days=90, overlap_days=1)
     print(f"Chunk listesi: {chunk_list}")
     for i, (chunk_start, chunk_end) in enumerate(chunk_list, 1):

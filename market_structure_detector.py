@@ -176,17 +176,16 @@ def run_full_market_structure_chain(
     logs = []
     trend_log = []
     used_pullbacks = set()
-    used_lls = set()
+    used_fractals = set()
 
     curr_up, curr_down = find_first_two_fractals(up_fractals, down_fractals)
     if not curr_up or not curr_down:
         logs.append("Başlangıç için yeterli fraktal yok!")
         return logs, trend_log
 
+    # --- Startup: ilk geçerli BoS ---
     for _ in range(100):
-        trend, break_fractal, break_candle, _ = find_first_fractal_break(
-            candles, curr_up, curr_down
-        )
+        trend, break_fractal, break_candle, _ = find_first_fractal_break(candles, curr_up, curr_down)
         if not trend:
             logs.append("Valid BoS bulunamadı.")
             return logs, trend_log
@@ -195,9 +194,7 @@ def run_full_market_structure_chain(
             candles, trend, break_fractal['fractal_time'], break_candle['open_time'],
             n=n_pullback, used_pb=used_pullbacks
         )
-        induced, pb, by = is_any_pullback_induced(
-            candles, trend, pullbacks, break_candle['open_time']
-        )
+        induced, pb, by = is_any_pullback_induced(candles, trend, pullbacks, break_candle['open_time'])
         if not induced:
             logs.append(f"[INIT] ❌ INVALID {trend} BoS: {break_fractal['fractal_time']} kırıldı @ {break_candle['open_time']}, inducement yok.")
             if trend == 'UP':
@@ -206,10 +203,7 @@ def run_full_market_structure_chain(
                 curr_down = find_next_fractal(down_fractals, curr_down['fractal_time'])
             continue
 
-        # Kritik seviye hesapla
-        segment_candles = [
-            c for c in candles if break_fractal['fractal_time'] <= c['open_time'] <= break_candle['open_time']
-        ]
+        segment_candles = [c for c in candles if break_fractal['fractal_time'] <= c['open_time'] <= break_candle['open_time']]
         kritik_seviye = (
             max(c['high'] for c in segment_candles)
             if trend == 'DOWN'
@@ -219,117 +213,105 @@ def run_full_market_structure_chain(
         logs.append(f"[INIT] ✅ VALID {trend} BoS")
         logs.append(f"   ↪ Kırılan fraktal: {break_fractal['fractal_time']} | Fiyat: {format_price(break_fractal['price'])}")
         logs.append(f"   ↪ Kıran mum:       {break_candle['open_time']} | Close: {format_price(break_candle['close'])}")
-        for p in pullbacks:
-            logs.append(f"   ↪ Pullback:        {p['open_time']} | Fiyat: {format_price(p['high'] if trend == 'DOWN' else p['low'])}")
         logs.append(f"   ↪ Induced PB:      {pb['open_time']} kırıldı → {by['open_time']}")
         logs.append(f"   ↪ Kritik seviye:   {format_price(kritik_seviye)}")
         trend_log.append((break_candle['open_time'], trend))
 
-        # --- Yeni segment başlangıcı: Kıran mumdan n kadar geri başla
-        n = n_pullback  # veya başka bir parametre, algoritmandaki n ile aynı olmalı
-        breaker_idx = next(idx for idx, c in enumerate(candles) if c['open_time'] == break_candle['open_time'])
-        segment_start_idx = max(breaker_idx - n, 0)
+        breaker_idx = next(i for i, c in enumerate(candles) if c['open_time'] == break_candle['open_time'])
+        segment_start_idx = max(breaker_idx - n_pullback, 0)
         segment_start_time = candles[segment_start_idx]['open_time']
+        used_fractals.add(break_fractal['fractal_time'])
         break
     else:
         logs.append("Zincir başlatılamadı (startup).")
         return logs, trend_log
 
-    # --- Segment zinciri ---
+    # --- Trend zinciri ---
     while True:
         if trend == 'DOWN':
             next_ll = find_next_fractal(down_fractals, segment_start_time)
             if not next_ll:
-                logs.append("➡️ Artık yeni LL (DOWN fraktal) yok.")
+                logs.append("➡️ Yeni LL yok, DOWN zinciri bitti.")
                 break
-            if next_ll['fractal_time'] in used_lls:
+            if next_ll['fractal_time'] in used_fractals:
                 break
-            breaker = next((x for x in candles if x['open_time'] > next_ll['fractal_time'] and x['close'] < next_ll['price']), None)
+
+            breaker = next((c for c in candles if c['open_time'] > next_ll['fractal_time'] and c['close'] < next_ll['price']), None)
             if not breaker:
                 logs.append(f"❌ LL {next_ll['fractal_time']} kırılmadı, bekleniyor...")
                 break
 
-            pullbacks = find_all_pullback_fractals(
-                candles, 'DOWN', next_ll['fractal_time'], breaker['open_time'], n=n_pullback, used_pb=used_pullbacks
-            )
+            pullbacks = find_all_pullback_fractals(candles, 'DOWN', next_ll['fractal_time'], breaker['open_time'], n=n_pullback)
             induced, pb, by = is_any_pullback_induced(candles, 'DOWN', pullbacks, breaker['open_time'])
-            if not induced:
-                logs.append(f"❌ LL {next_ll['fractal_time']} kırıldı ama inducement yok, devam edilmiyor.")
-                break
 
+            if not induced:
+                logs.append(f"❌ LL {next_ll['fractal_time']} kırıldı ama inducement yok, yeni LL aranıyor.")
+                used_fractals.add(next_ll['fractal_time'])
+                segment_start_time = next_ll['fractal_time']
+                continue
+
+            # Yeni kritik seviye: LL ile breaker arası en yüksek high
             segment_candles = [c for c in candles if next_ll['fractal_time'] <= c['open_time'] <= breaker['open_time']]
             kritik_seviye = max(c['high'] for c in segment_candles)
 
-            logs.append(f"[CONT] ✅ DOWN devam → LL: {next_ll['fractal_time']} | Fiyat: {format_price(next_ll['price'])}")
-            logs.append(f"   ↪ Kıran mum: {breaker['open_time']} | Close: {format_price(breaker['close'])}")
-            for p in pullbacks:
-                logs.append(f"   ↪ Pullback: {p['open_time']} | High: {format_price(p['high'])}")
-            logs.append(f"   ↪ Induced PB: {pb['open_time']} → {by['open_time']}")
+            logs.append(f"[CONT] ✅ DOWN devam → LL: {next_ll['fractal_time']}")
+            logs.append(f"   ↪ Kıran mum: {breaker['open_time']}")
             logs.append(f"   ↪ Yeni kritik seviye: {format_price(kritik_seviye)}")
             trend_log.append((breaker['open_time'], trend))
-            # Burada yeni segment başlangıcı yine kıran mumdan n geri alınmalı!
-            breaker_idx = next(idx for idx, c in enumerate(candles) if c['open_time'] == breaker['open_time'])
-            segment_start_idx = max(breaker_idx - n, 0)
-            segment_start_time = candles[segment_start_idx]['open_time']
-            used_lls.add(next_ll['fractal_time'])
-            used_pullbacks.update(p['open_time'] for p in pullbacks)
-        else:
+            used_fractals.add(next_ll['fractal_time'])
+            segment_start_time = breaker['open_time']
+
+        else:  # UP trend
             next_hh = find_next_fractal(up_fractals, segment_start_time)
             if not next_hh:
-                logs.append("➡️ Artık yeni HH (UP fraktal) yok.")
+                logs.append("➡️ Yeni HH yok, UP zinciri bitti.")
                 break
-            if next_hh['fractal_time'] in used_lls:
+            if next_hh['fractal_time'] in used_fractals:
                 break
-            breaker = next((x for x in candles if x['open_time'] > next_hh['fractal_time'] and x['close'] > next_hh['price']), None)
+
+            breaker = next((c for c in candles if c['open_time'] > next_hh['fractal_time'] and c['close'] > next_hh['price']), None)
             if not breaker:
                 logs.append(f"❌ HH {next_hh['fractal_time']} kırılmadı, bekleniyor...")
                 break
 
-            pullbacks = find_all_pullback_fractals(
-                candles, 'UP', next_hh['fractal_time'], breaker['open_time'], n=n_pullback, used_pb=used_pullbacks
-            )
+            pullbacks = find_all_pullback_fractals(candles, 'UP', next_hh['fractal_time'], breaker['open_time'], n=n_pullback)
             induced, pb, by = is_any_pullback_induced(candles, 'UP', pullbacks, breaker['open_time'])
-            if not induced:
-                logs.append(f"❌ HH {next_hh['fractal_time']} kırıldı ama inducement yok, devam edilmiyor.")
-                break
 
+            if not induced:
+                logs.append(f"❌ HH {next_hh['fractal_time']} kırıldı ama inducement yok, yeni HH aranıyor.")
+                used_fractals.add(next_hh['fractal_time'])
+                segment_start_time = next_hh['fractal_time']
+                continue
+
+            # Yeni kritik seviye: HH ile breaker arası en düşük low
             segment_candles = [c for c in candles if next_hh['fractal_time'] <= c['open_time'] <= breaker['open_time']]
             kritik_seviye = min(c['low'] for c in segment_candles)
 
-            logs.append(f"[CONT] ✅ UP devam → HH: {next_hh['fractal_time']} | Fiyat: {format_price(next_hh['price'])}")
-            logs.append(f"   ↪ Kıran mum: {breaker['open_time']} | Close: {format_price(breaker['close'])}")
-            for p in pullbacks:
-                logs.append(f"   ↪ Pullback: {p['open_time']} | Low: {format_price(p['low'])}")
-            logs.append(f"   ↪ Induced PB: {pb['open_time']} → {by['open_time']}")
+            logs.append(f"[CONT] ✅ UP devam → HH: {next_hh['fractal_time']}")
+            logs.append(f"   ↪ Kıran mum: {breaker['open_time']}")
             logs.append(f"   ↪ Yeni kritik seviye: {format_price(kritik_seviye)}")
             trend_log.append((breaker['open_time'], trend))
-            breaker_idx = next(idx for idx, c in enumerate(candles) if c['open_time'] == breaker['open_time'])
-            segment_start_idx = max(breaker_idx - n, 0)
-            segment_start_time = candles[segment_start_idx]['open_time']
-            used_lls.add(next_hh['fractal_time'])
-            used_pullbacks.update(p['open_time'] for p in pullbacks)
+            used_fractals.add(next_hh['fractal_time'])
+            segment_start_time = breaker['open_time']
 
         # --- CHOCH kontrolü ---
         for cc in candles:
             if cc['open_time'] > segment_start_time:
                 if trend == 'DOWN' and cc['high'] > kritik_seviye:
-                    logs.append(f"[CHOCH] Trend DOWN → UP @ {cc['open_time']} | Close={format_price(cc['close'])} kritik={format_price(kritik_seviye)}")
+                    logs.append(f"[CHOCH] Trend DOWN → UP @ {cc['open_time']} | Close={format_price(cc['close'])}")
                     trend = 'UP'
                     trend_log.append((cc['open_time'], trend))
-                    breaker_idx = next(idx for idx, c in enumerate(candles) if c['open_time'] == cc['open_time'])
-                    segment_start_idx = max(breaker_idx - n, 0)
-                    segment_start_time = candles[segment_start_idx]['open_time']
+                    segment_start_time = cc['open_time']
                     break
                 if trend == 'UP' and cc['low'] < kritik_seviye:
-                    logs.append(f"[CHOCH] Trend UP → DOWN @ {cc['open_time']} | Close={format_price(cc['close'])} kritik={format_price(kritik_seviye)}")
+                    logs.append(f"[CHOCH] Trend UP → DOWN @ {cc['open_time']} | Close={format_price(cc['close'])}")
                     trend = 'DOWN'
                     trend_log.append((cc['open_time'], trend))
-                    breaker_idx = next(idx for idx, c in enumerate(candles) if c['open_time'] == cc['open_time'])
-                    segment_start_idx = max(breaker_idx - n, 0)
-                    segment_start_time = candles[segment_start_idx]['open_time']
+                    segment_start_time = cc['open_time']
                     break
 
     return logs, trend_log
+
 
 
 
