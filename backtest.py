@@ -342,10 +342,22 @@ def full_gridsearch(trade_logs, start_str, end_str):
         candles_1h, up_fractals_1h, down_fractals_1h, n_fractal=10, n_pullback=2
     )
 
-    with open(f"logs/market_structure_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt", "w", encoding="utf-8") as f:
+    # --- Yeni market structure log yazımı ---
+    output_path = f"logs/market_structure_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("=== MARKET STRUCTURE ANALYSIS ===\n")
+        f.write(f"Sembol: {symbols[0]}\nZaman Aralığı: {structure_timeframe}\n\n")
+
         for line in logs:
             f.write(line + "\n")
-    print(f"✅ Market structure analizi tamamlandı. Sonuçlar: logs/market_structure_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt")
+
+        f.write("\n=== TREND DEĞİŞİMLERİ ===\n")
+        for t, tr in trend_log:
+            f.write(f"{t} → {tr}\n")
+
+    print(f"✅ Market structure analizi tamamlandı. Sonuçlar: {output_path}")
+
 
     startup_logs = startup_find_valid_bos(
         candles_1h, up_fractals_1h, down_fractals_1h, n_fractal=10, n_pullback=2
