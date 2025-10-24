@@ -28,7 +28,7 @@ timeframes = ['5m']
 fibo_levels = [0.618]
 rrs = [2]
 ns = [2]
-symbols = ['BTCUSDT']
+symbols = ['SOLUSDT']
 stop_values = [1.035]
 combinations = list(itertools.product(fibo_levels, stop_values, rrs))
 
@@ -339,34 +339,42 @@ def full_gridsearch(trade_logs, start_str, end_str):
     print(f"✅ Bütün fraktallar log dosyasına yazıldı.")
 
     logs, trend_log = run_full_market_structure_chain(
-        candles_1h, up_fractals_1h, down_fractals_1h, n_fractal=10, n_pullback=2
+        candles_1h, up_fractals_1h, down_fractals_1h, n_pullback=2
     )
 
-    # --- Yeni market structure log yazımı ---
-    output_path = f"logs/market_structure_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt"
+    # --- LOG GÜVENLİ DÜZLEŞTİRME ---
+    def flatten_logs(data):
+        flat = []
+        if isinstance(data, list):
+            for item in data:
+                flat.extend(flatten_logs(item))
+        else:
+            flat.append(str(data))
+        return flat
 
+    flat_logs = flatten_logs(logs)
+    output_path = f"logs/market_structure_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("=== MARKET STRUCTURE ANALYSIS ===\n")
         f.write(f"Sembol: {symbols[0]}\nZaman Aralığı: {structure_timeframe}\n\n")
-
-        for line in logs:
-            f.write(line + "\n")
+        for line in flat_logs:
+            f.write(str(line) + "\n")
 
         f.write("\n=== TREND DEĞİŞİMLERİ ===\n")
         for t, tr in trend_log:
             f.write(f"{t} → {tr}\n")
 
+
     print(f"✅ Market structure analizi tamamlandı. Sonuçlar: {output_path}")
 
-
     startup_logs = startup_find_valid_bos(
-        candles_1h, up_fractals_1h, down_fractals_1h, n_fractal=10, n_pullback=2
+        candles_1h, up_fractals_1h, down_fractals_1h, n_pullback=2
     )
 
     log_lines = startup_logs['logs'] if isinstance(startup_logs, dict) and 'logs' in startup_logs else startup_logs
     with open(f"logs/startup_bos_log_{symbols[0]}_{structure_timeframe}_{start_str[:10]}_{end_str[:10]}.txt", "w", encoding="utf-8") as f:
         for line in log_lines:
-            f.write(line + "\n")
+            f.write(str(line) + "\n")
     print(f"✅ Startup valid BoS log dosyasına yazıldı.")
 
     if len(trade_logs) > 0 and isinstance(trade_logs[0], dict):
@@ -405,7 +413,7 @@ def full_gridsearch(trade_logs, start_str, end_str):
 
 if __name__ == "__main__":
     start_str = "2025-10-01 00:00:00"
-    end_str   = "2025-10-08 00:00:00"
+    end_str   = "2025-10-15 00:00:00"
     chunk_list = get_chunks(start_str, end_str, chunk_days=90, overlap_days=1)
     print(f"Chunk listesi: {chunk_list}")
     for i, (chunk_start, chunk_end) in enumerate(chunk_list, 1):

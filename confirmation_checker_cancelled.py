@@ -64,9 +64,10 @@ def is_range_market_by_price(candles, liq_candle_time, window=36):
 
 # --- YARDIMCI: Ters tarafta likidite alındıysa cancelled statusunu işle ---
 def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
-    print("\n--- Cancelled Kontrolü Başladı (High/Low Kırılımı) ---")
+    # print("\n--- Cancelled Kontrolü Başladı (High/Low Kırılımı) ---")
     cancelled_count = 0
     opposite_liq_but_completed = 0
+
     for log in detailed_logs:
         # Sadece entry_time gelmiş ve status completed olanları kontrol et!
         if log.get("status", "completed") == "completed" and log.get("entry_time"):
@@ -75,13 +76,16 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
             liq_candle_time = log.get("liq_candle_time")
             f_type = log.get("liq_fractal_type")
             direction = log.get("direction")
+
             if not (entry_time and liq_fractal_time and f_type and direction):
-                print(f"[SKIP] Eksik data: {log}")
+                # print(f"[SKIP] Eksik data: {log}")
                 continue
+
             opposite_type = "DOWN" if f_type == "UP" else "UP"
             found_cancel = False
             found_opposite_liq = False
             breakout_fractal_time = log.get("breakout_fractal_time")
+
             for vf in valid_fractals:
                 # 1) Karşı tarafta, entry_time öncesi, arada likidite alınmış mı?
                 if (
@@ -91,50 +95,54 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
                     str(vf.get('liquidity_time')) > str(liq_candle_time) and
                     str(vf.get('liquidity_time')) <= str(entry_time)
                 ):
-                    # 2) Likidite alan mumun high/low'u:
                     found_opposite_liq = True
                     liq_mum_time = vf.get("liquidity_time")
                     liq_mum = next((c for c in candles if str(c['open_time']) == str(liq_mum_time)), None)
                     if not liq_mum:
                         continue
+
                     liq_high = float(liq_mum["high"])
                     liq_low = float(liq_mum["low"])
-                    # 3) O mumdan sonraki mumların kapanışlarını gez:
+
                     cancelled = False
                     for c in candles:
                         if str(c['open_time']) <= str(liq_mum_time) or str(c['open_time']) > str(entry_time):
                             continue
                         close_price = float(c["close"])
-                        # DOWN işlemler için: high kırılırsa cancelled, low kırılırsa devam
+
+                        # DOWN işlemler için
                         if direction == "DOWN":
                             if close_price > liq_high:
                                 cancelled = True
-                                break  # iptal
+                                break
                             elif close_price < liq_low:
-                                break  # devam
-                        # UP işlemler için: low kırılırsa cancelled, high kırılırsa devam
+                                break
+                        # UP işlemler için
                         elif direction == "UP":
                             if close_price < liq_low:
                                 cancelled = True
-                                break  # iptal
+                                break
                             elif close_price > liq_high:
-                                break  # devam
+                                break
+
                     if cancelled:
                         log["status"] = "cancelled"
                         log["cancelled_liq_time"] = vf.get("liquidity_time")
                         log["cancelled_fractal_time"] = vf.get("fractal_time")
                         found_cancel = True
                         cancelled_count += 1
-                        print(f"[CANCELLED] {log['liq_fractal_time']} → {entry_time} | Karşı fraktal: {vf.get('fractal_time')} lik: {vf.get('liquidity_time')}")
+                        # print(f"[CANCELLED] {log['liq_fractal_time']} → {entry_time} | Karşı fraktal: {vf.get('fractal_time')} lik: {vf.get('liquidity_time')}")
                         break
                     else:
-                        # İptal olmadan karşı likidite var ve devam etti!
-                        print(f"[OPPOSITE-LIQ-NOT-CANCELLED] {log['liq_fractal_time']} → {entry_time} | Karşı fraktal: {vf.get('fractal_time')} lik: {vf.get('liquidity_time')}")
+                        # print(f"[OPPOSITE-LIQ-NOT-CANCELLED] {log['liq_fractal_time']} → {entry_time} | Karşı fraktal: {vf.get('fractal_time')} lik: {vf.get('liquidity_time')}")
                         opposite_liq_but_completed += 1
+
             if not found_cancel and not found_opposite_liq:
-                print(f"[COMPLETED] {log['liq_fractal_time']} → {entry_time}")
-    print(f"Toplam CANCELLED: {cancelled_count}")
-    print(f"Toplam Karşı likiditeyle tamamlanan işlem: {opposite_liq_but_completed}")
+                # print(f"[COMPLETED] {log['liq_fractal_time']} → {entry_time}")
+                pass
+
+    # print(f"Toplam CANCELLED: {cancelled_count}")
+    # print(f"Toplam Karşı likiditeyle tamamlanan işlem: {opposite_liq_but_completed}")
     return detailed_logs
 
 def run_confirmation_chain(
