@@ -120,7 +120,7 @@ def startup_find_valid_bos(candles, up_fractals, down_fractals, n_pullback=2):
 # UP TREND ZİNCİRİ
 # ======================
 
-def run_market_structure_uptrend(candles, up_fractals, kritik_baslangic, start_time, n_pullback=2):
+def run_market_structure_uptrend(candles, up_fractals, down_fractals, kritik_baslangic, start_time, n_pullback=2, trend_log=None):
     logs = []
     trend = "UP"
     kritik = kritik_baslangic
@@ -132,11 +132,36 @@ def run_market_structure_uptrend(candles, up_fractals, kritik_baslangic, start_t
         if c["open_time"] < start_time:
             continue
 
-        # 1️⃣ CHOCH bağımsız kontrol
+        # CHOCH bağımsız kontrol
         if c["close"] < kritik:
-            logs.append(f"[CHOCH] Trend UP → DOWN @ {c['open_time']} | Kritik: {format_price(kritik)}")
+            # --- CHOCH sonrası kritik seviye yeniden hesapla ---
+            segment = [x for x in candles if start_time <= x["open_time"] <= c["open_time"]]
+            if segment:
+                kritik = max(x["high"] for x in segment)  # UP→DOWN geçişinde en yüksek high
+                kritik_zaman = next(x["open_time"] for x in segment if x["high"] == kritik)
+            else:
+                kritik_zaman = c["open_time"]
+
+            logs.append(f"[CHOCH] Trend UP → DOWN @ {c['open_time']} | Yeni kritik: {format_price(kritik)} | Zaman: {kritik_zaman}")
             logs.append("[RESTART] CHOCH sonrası yeni DOWN zinciri başlatılıyor.")
             trend = "DOWN"
+
+            if trend_log is not None:
+                trend_log.append((c["open_time"], trend))
+
+            # --- Debounce + doğru argümanlar ---
+            next_down_fractals = [f for f in down_fractals if f["fractal_time"] > c["open_time"]]
+            next_start_time = c["open_time"]
+
+            sub_logs, kritik, trend = run_market_structure_downtrend(
+                candles,
+                down_fractals,
+                up_fractals,
+                kritik,           # kritik_baslangic
+                next_start_time,  # start_time
+                n_pullback=n_pullback
+            )
+            logs.extend(sub_logs)
             break
 
         # === 2️⃣ Yeni HH arama ===
@@ -174,9 +199,91 @@ def run_market_structure_uptrend(candles, up_fractals, kritik_baslangic, start_t
                 bos_state = "WAIT_BREAK"
                 aktif_fraktal = None
 
-    logs.append(f"[SON] UP trend zinciri tamamlandı. Kritik: {format_price(kritik)}")
     return logs, kritik, trend
 
+# ======================
+# DOWN TREND ZİNCİRİ
+# ======================
+
+def run_market_structure_downtrend(candles, down_fractals, up_fractals, kritik_baslangic, start_time, n_pullback=2, trend_log=None):
+    logs = []
+    trend = "DOWN"
+    kritik = kritik_baslangic
+    aktif_fraktal = None
+    bos_state = "WAIT_BREAK"
+
+    for c in candles:
+        if c["open_time"] <= start_time:
+            continue
+
+        # CHOCH bağımsız kontrol
+        if c["close"] > kritik:
+            # --- CHOCH sonrası kritik seviye yeniden hesapla ---
+            segment = [x for x in candles if start_time <= x["open_time"] <= c["open_time"]]
+            if segment:
+                kritik = min(x["low"] for x in segment)  # DOWN→UP geçişinde en düşük low
+                kritik_zaman = next(x["open_time"] for x in segment if x["low"] == kritik)
+            else:
+                kritik_zaman = c["open_time"]
+
+            logs.append(f"[CHOCH] Trend DOWN → UP @ {c['open_time']} | Yeni kritik: {format_price(kritik)} | Zaman: {kritik_zaman}")
+            logs.append("[RESTART] CHOCH sonrası yeni UP zinciri başlatılıyor.")
+            trend = "UP"
+            
+            if trend_log is not None:
+                trend_log.append((c["open_time"], trend))
+
+            # --- Debounce + doğru argümanlar ---
+            next_up_fractals = [f for f in up_fractals if f["fractal_time"] > c["open_time"]]
+            next_start_time = c["open_time"]
+
+            sub_logs, kritik, trend = run_market_structure_uptrend(
+                candles,
+                up_fractals,
+                down_fractals,
+                kritik,           # kritik_baslangic
+                next_start_time,  # start_time
+                n_pullback=n_pullback
+            )
+            logs.extend(sub_logs)
+            break
+
+        # === 2️⃣ Yeni LL arama ===
+        if bos_state == "WAIT_BREAK":
+            # 1️⃣ Önce kıran mumda fraktal var mı kontrol et
+            aktif_fraktal = next((f for f in down_fractals if f["fractal_time"] == start_time), None)
+
+            # 2️⃣ Yoksa sıradaki fraktalı al
+            if not aktif_fraktal:
+                aktif_fraktal = next((f for f in down_fractals if f["fractal_time"] > start_time), None)
+
+            if aktif_fraktal:
+                logs.append(f"[CONT] 🔍 Yeni LL adayı @ {aktif_fraktal['fractal_time']} | Fiyat: {aktif_fraktal['price']}")
+                bos_state = "WAIT_VALIDATION"
+                continue
+
+        # === 3️⃣ LL kırılımı kontrolü ===
+        if bos_state == "WAIT_VALIDATION" and aktif_fraktal:
+            if c["close"] < float(aktif_fraktal["price"]):
+                segment = [x for x in candles if aktif_fraktal["fractal_time"] <= x["open_time"] <= c["open_time"]]
+                pullbacks = find_all_pullback_fractals(candles, "DOWN", aktif_fraktal["fractal_time"], c["open_time"], n=n_pullback)
+                induced, pb, by = is_any_pullback_induced(candles, "DOWN", pullbacks, c["open_time"])
+
+                if induced:
+                    kritik = max(x["high"] for x in segment)
+                    kritik_zaman = next(x["open_time"] for x in segment if x["high"] == kritik)
+                    logs.append(f"[CONT] ✅ VALID DOWN BoS: {aktif_fraktal['fractal_time']} → {c['open_time']}")
+                    logs.append(f"   ↪ Yeni kritik seviye: {format_price(kritik)} | Zaman: {kritik_zaman}")
+                else:
+                    logs.append(f"[CONT] ❌ INVALID DOWN BoS: {aktif_fraktal['fractal_time']} → {c['open_time']}")
+                    logs.append(f"   ↪ Kritik seviye aynı kaldı: {format_price(kritik)}")
+
+                start_time = c["open_time"]
+                bos_state = "WAIT_BREAK"
+                aktif_fraktal = None
+
+    logs.append(f"[SON] DOWN trend zinciri tamamlandı. Kritik: {format_price(kritik)}")
+    return logs, kritik, trend
 
 # ======================
 # ANA FONKSİYON
@@ -203,7 +310,16 @@ def run_full_market_structure_chain(candles, up_fractals, down_fractals, n_pullb
 
     # UP trend zinciri
     if trend == "UP":
-        chain_logs, kritik, trend = run_market_structure_uptrend(candles, up_fractals, kritik, break_time, n_pullback=n_pullback)
+        chain_logs, kritik, trend = run_market_structure_uptrend(
+            candles, up_fractals, down_fractals, kritik, break_time, n_pullback=n_pullback, trend_log=trend_log
+        )
+        logs.extend(chain_logs)
+
+    # DOWN trend zinciri
+    elif trend == "DOWN":
+        chain_logs, kritik, trend = run_market_structure_downtrend(
+            candles, down_fractals, up_fractals, kritik, break_time, n_pullback=n_pullback, trend_log=trend_log
+        )
         logs.extend(chain_logs)
 
     # Logları tamamen düzleştir
