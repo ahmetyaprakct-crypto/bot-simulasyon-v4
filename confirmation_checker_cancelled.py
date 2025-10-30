@@ -49,18 +49,30 @@ def find_next_opposite_fractal(fractals, after_time, f_type):
         return min(future, key=lambda x: x['fractal_time'])
     return None
 
-def is_range_market_by_price(candles, liq_candle_time, window=36):
+def is_range_market_by_price(candles, liq_fractal_candle_time, window=33):
+    """
+    Likiditesi alınan mumdan (liq_fractal_candle_time)
+    ÖNCEKİ 'window' kadar mumu alır.
+    Likiditesi alınan mum pencereye DAHİL edilmez.
+    """
     idx = None
     for i, c in enumerate(candles):
-        if str(c['open_time']) == str(liq_candle_time):
+        if str(c['open_time']) == str(liq_fractal_candle_time):
             idx = i
             break
+
+    # Eğer yeterli veri yoksa
     if idx is None or idx < window:
         return False, None, None
-    prev_candles = candles[idx-window:idx]
+
+    # Likiditesi alınan mumdan ÖNCEKİ 33 mum
+    prev_candles = candles[idx - window: idx]
+
     range_high = max(c['high'] for c in prev_candles)
-    range_low  = min(c['low'] for c in prev_candles)
+    range_low = min(c['low'] for c in prev_candles)
+
     return True, range_high, range_low
+
 
 # --- YARDIMCI: Ters tarafta likidite alındıysa cancelled statusunu işle ---
 def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
@@ -208,19 +220,25 @@ def run_confirmation_chain(
         range_flag = False
         range_high, range_low = None, None
         is_in_range = None
-        # liq_candle_idx = likidite ALAN mumun index'i!
-        liq_candle_idx = next((i for i, c in enumerate(candles) if c['open_time'] == vf['liquidity_time']), None)
-        window = 36
-        if liq_candle_idx is not None and liq_candle_idx >= window:
-            prev_candles = candles[liq_candle_idx-window:liq_candle_idx]
+        # --- RANGE MARKET ANALİZİ ---
+        liq_fractal_idx = next((i for i, c in enumerate(candles) if c['open_time'] == vf['fractal_time']), None)
+        window = 33
+        if liq_fractal_idx is not None and liq_fractal_idx >= window:
+            prev_candles = candles[liq_fractal_idx - window : liq_fractal_idx]
             range_high = max(c['high'] for c in prev_candles)
-            range_low = min(c['low'] for c in prev_candles)
+            range_low  = min(c['low'] for c in prev_candles)
             range_flag = True
-            liq_candle = candles[liq_candle_idx]
-            liq_candle_price = liq_candle['low'] if liq_candle else None
-            if range_low is not None and range_high is not None and liq_candle_price is not None:
-                is_in_range = range_low <= liq_candle_price <= range_high
 
+            liq_fractal_candle = candles[liq_fractal_idx]
+            candle_high = liq_fractal_candle['high']
+            candle_low  = liq_fractal_candle['low']
+
+            # ✅ Eğer mumun high VE low değeri de range içindeyse → True
+            # ✅ Eğer high veya low range dışına taşıyorsa → False
+            if range_low <= candle_low and candle_high <= range_high:
+                is_in_range = True
+            else:
+                is_in_range = False
 
         if pending_fractal is None:
             continue

@@ -28,7 +28,7 @@ timeframes = ['5m']
 fibo_levels = [0.618]
 rrs = [2]
 ns = [2]
-symbols = ['SOLUSDT']
+symbols = ['BTCUSDT']
 stop_values = [1.035]
 combinations = list(itertools.product(fibo_levels, stop_values, rrs))
 
@@ -412,8 +412,8 @@ def full_gridsearch(trade_logs, start_str, end_str):
                 print(f"{i}: liq_candle_time={log.get('liq_candle_time')}, trend_1h={log.get('trend_1h')}, status={log.get('status')}")
 
 if __name__ == "__main__":
-    start_str = "2025-10-01 00:00:00"
-    end_str   = "2025-10-15 00:00:00"
+    start_str = "2025-10-15 00:00:00"
+    end_str   = "2025-10-23 00:00:00"
     chunk_list = get_chunks(start_str, end_str, chunk_days=90, overlap_days=1)
     print(f"Chunk listesi: {chunk_list}")
     for i, (chunk_start, chunk_end) in enumerate(chunk_list, 1):
