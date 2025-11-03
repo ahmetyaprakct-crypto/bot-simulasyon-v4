@@ -1,4 +1,7 @@
 from liquidity_checker import get_valid_liquidity_fractals
+from fractal_detector import detect_fractals_full
+import config
+from db_manager import DatabaseManager
 import csv
 import pandas as pd
 trade_logs = []  # Tüm işlemler buraya eklenecek
@@ -161,6 +164,20 @@ def run_confirmation_chain(
     fractals, candles, trade_logs, symbol=None, n=None, rr=None, fibo_level=None,
     stop_value=None, log_func=None, detailed_logs=None
 ):
+    # --- [YENİ] Onay kırılımı için n=3 fraktallarını üret ---
+    confirm_fractals_n3 = []
+    try:
+        from db_manager import DatabaseManager
+        from fractal_detector import detect_fractals_full
+        import config
+        db_tmp = DatabaseManager(config.db_config)
+        # detect_fractals_full artık bellekte n=3 fraktalları döndürecek
+        confirm_fractals_n3 = detect_fractals_full(symbol, candles, db_tmp, tf="tmp", n=3, write_to_db=False)
+        db_tmp.close()
+        print(f"[CONFIRM] {symbol} için n=3 fraktallar oluşturuldu: {len(confirm_fractals_n3)} adet")
+    except Exception as e:
+        print(f"[WARN] n=3 confirmation fraktallar oluşturulamadı: {e}")
+
     from backtest import add_atr_threshold_to_candles
     add_atr_threshold_to_candles(candles, atr_period=14, threshold_window=300)
     if detailed_logs is None:
@@ -202,7 +219,6 @@ def run_confirmation_chain(
 
     for vf in valid_fractals:
         pending_fractal = vf
-
         # FİLTRE 1: Likidite gecikme kontrolü
         liq_fractal_idx = next((i for i, c in enumerate(candles) if c['open_time'] == vf['fractal_time']), None)
         liq_candle_time = vf.get('liquidity_time')
@@ -244,7 +260,14 @@ def run_confirmation_chain(
             continue
 
         f_type = pending_fractal.get('fractal_type', pending_fractal.get('type'))
-        prior_opposite = find_prior_opposite_fractal(fractals, pending_fractal['liquidity_time'], f_type)
+        # --- n=3 fraktallarından ters fraktal bul (onay kırılımı) ---
+        if confirm_fractals_n3:
+            log(f"[DEBUG] Onay kırılımı n=3 fraktallardan arandı | {len(confirm_fractals_n3)} adet aktif fraktal")
+        else:
+            log("[DEBUG] Onay kırılımı n=2 fraktallardan arandı (fallback)")
+
+        prior_opposite = find_prior_opposite_fractal(confirm_fractals_n3 if confirm_fractals_n3 else fractals,
+                                                    pending_fractal['liquidity_time'], f_type)
         if not prior_opposite:
             log(f"❌ Ters fraktal yok | {f_type} @ {pending_fractal['fractal_time']}")
             pending_fractal = None
