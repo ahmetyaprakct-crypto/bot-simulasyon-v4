@@ -96,6 +96,16 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
                 # print(f"[SKIP] Eksik data: {log}")
                 continue
 
+            # --- [YENİ CANCELLED KOŞULU - C1] ---
+            # Onay fraktalı (breakout_fractal_time) likidite alınan ve alan mumlar arasında değilse iptal
+            confirm_fractal_time = log.get("breakout_fractal_time")
+            if confirm_fractal_time and liq_fractal_time and liq_candle_time:
+                if not (str(liq_fractal_time) < str(confirm_fractal_time) < str(liq_candle_time)):
+                    log["status"] = "cancelled"
+                    log["cancel_reason"] = "C1"  # C1 = Onay fraktalı aralık dışında
+                    cancelled_count += 1
+                    continue
+
             opposite_type = "DOWN" if f_type == "UP" else "UP"
             found_cancel = False
             found_opposite_liq = False
@@ -129,6 +139,7 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
                         if direction == "DOWN":
                             if close_price > liq_high:
                                 cancelled = True
+                                log["cancel_reason"] = "C2"  # C2 = Karşı high kırıldı
                                 break
                             elif close_price < liq_low:
                                 break
@@ -136,6 +147,7 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
                         elif direction == "UP":
                             if close_price < liq_low:
                                 cancelled = True
+                                log["cancel_reason"] = "C3"  # C3 = Karşı low kırıldı
                                 break
                             elif close_price > liq_high:
                                 break
