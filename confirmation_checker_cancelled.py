@@ -76,7 +76,6 @@ def is_range_market_by_price(candles, liq_fractal_candle_time, window=33):
 
     return True, range_high, range_low
 
-
 # --- YARDIMCI: Ters tarafta likidite alındıysa cancelled statusunu işle ---
 def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
     # print("\n--- Cancelled Kontrolü Başladı (High/Low Kırılımı) ---")
@@ -164,6 +163,49 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
                         # print(f"[OPPOSITE-LIQ-NOT-CANCELLED] {log['liq_fractal_time']} → {entry_time} | Karşı fraktal: {vf.get('fractal_time')} lik: {vf.get('liquidity_time')}")
                         opposite_liq_but_completed += 1
 
+            # --- [YENİ CANCELLED KOŞULU - C4] ---
+            # C4 = Fibo 0.40 and range out (fiyat 0.40’a dokunup fib aralığının dışına çıktı)
+            fib_040 = None
+            try:
+                entry_price = float(log.get("entry_price", 0))
+                sl_price = float(log.get("sl_price", 0))
+                tp_price = float(log.get("tp_price", 0))
+                liq_candle_time = log.get("liq_candle_time")
+
+                if entry_price > 0 and sl_price > 0 and tp_price > 0 and liq_candle_time:
+                    fibo_high = max(entry_price, sl_price, tp_price)
+                    fibo_low = min(entry_price, sl_price, tp_price)
+                    fib_range = fibo_high - fibo_low
+                    direction = log.get("direction")
+
+                    fib_040 = fibo_high - fib_range * 0.40 if direction == "UP" else fibo_low + fib_range * 0.40
+
+                    liq_idx = next((i for i, c in enumerate(candles) if str(c["open_time"]) == str(liq_candle_time)), None)
+                    entry_time = log.get("entry_time")
+
+                    if liq_idx is not None:
+                        for c in candles[liq_idx + 1:]:
+                            if entry_time and str(c["open_time"]) >= str(entry_time):
+                                break
+
+                            # UP işlemler için: low < fib_040 ve high > fibo_high
+                            if direction == "UP" and c["low"] < fib_040 and c["high"] > fibo_high:
+                                log["status"] = "cancelled"
+                                log["cancel_reason"] = "C4"  # C4 = fib 0.40 and range out
+                                log["cancel_time"] = c["open_time"]
+                                cancelled_count += 1
+                                break
+
+                            # DOWN işlemler için: high > fib_040 ve low < fibo_low
+                            if direction == "DOWN" and c["high"] > fib_040 and c["low"] < fibo_low:
+                                log["status"] = "cancelled"
+                                log["cancel_reason"] = "C4"  # C4 = fib 0.40 and range out
+                                log["cancel_time"] = c["open_time"]
+                                cancelled_count += 1
+                                break
+            except Exception:
+                pass
+
             if not found_cancel and not found_opposite_liq:
                 # print(f"[COMPLETED] {log['liq_fractal_time']} → {entry_time}")
                 pass
@@ -171,6 +213,7 @@ def mark_cancelled_trades(detailed_logs, valid_fractals, candles):
     # print(f"Toplam CANCELLED: {cancelled_count}")
     # print(f"Toplam Karşı likiditeyle tamamlanan işlem: {opposite_liq_but_completed}")
     return detailed_logs
+
 
 def run_confirmation_chain(
     fractals, candles, trade_logs, symbol=None, n=None, rr=None, fibo_level=None,
