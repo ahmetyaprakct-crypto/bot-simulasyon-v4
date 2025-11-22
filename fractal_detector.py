@@ -16,6 +16,7 @@ def clear_fractals_table(symbol, db, tf):
         db.conn.commit()
     print(f"✅ {table} tablosu temizlendi.")
 
+import traceback
 
 def detect_fractals_full(symbol, candles, db=None, tf=None, n=2, write_to_db=True):
     """
@@ -63,6 +64,9 @@ def detect_fractals_full(symbol, candles, db=None, tf=None, n=2, write_to_db=Tru
                 total_up += 1
             except Exception as e:
                 print(f"INSERT ERROR UP {center['open_time']}: {e}")
+                print(traceback.format_exc())
+                if db:
+                    db.conn.rollback()
 
         if is_down_fractal:
             print(f"🔍 Fractal DOWN tespit edildi: {center['open_time']} - {center['low']}")
@@ -77,6 +81,9 @@ def detect_fractals_full(symbol, candles, db=None, tf=None, n=2, write_to_db=Tru
                 total_down += 1
             except Exception as e:
                 print(f"INSERT ERROR DOWN {center['open_time']}: {e}")
+                print(traceback.format_exc())
+                if db:
+                    db.conn.rollback()
 
     # Özet logları
     print(f"▶️ Tespit edilen toplam UP fraktal: {total_up}")
@@ -85,6 +92,7 @@ def detect_fractals_full(symbol, candles, db=None, tf=None, n=2, write_to_db=Tru
 
     # DB doğrulama
     if write_to_db and db and tf:
+        db.conn.commit()
         with db.conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM fractal_{tf} WHERE symbol = %s", (symbol,))
             count_in_db = cur.fetchone()[0]

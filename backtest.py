@@ -28,7 +28,7 @@ timeframes = ['5m']
 fibo_levels = [0.618]
 rrs = [2]
 ns = [2]
-symbols = ['DOGEUSDT']
+symbols = ['BNBUSDT']
 stop_values = [1.035]
 combinations = list(itertools.product(fibo_levels, stop_values, rrs))
 
@@ -49,14 +49,25 @@ def get_chunks(start_date, end_date, chunk_days=90, overlap_days=1):
         start = chunk_end
     return chunks
 
+import psycopg2
+
 def truncate_candles_table(symbol, interval):
     db = DatabaseManager(config.db_config)
     cur = db.conn.cursor()
-    cur.execute(f"TRUNCATE TABLE candles_{interval};")
-    db.conn.commit()
-    cur.close()
-    db.close()
-    print(f"✅ {symbol} {interval} için candle tablosu sıfırlandı.")
+    try:
+        cur.execute(f"TRUNCATE TABLE candles_{interval};")
+        db.conn.commit()
+        print(f"✅ {symbol} {interval} için candle tablosu sıfırlandı.")
+    except psycopg2.errors.UndefinedTable:
+        db.conn.rollback()
+        print(f"⚠️ candles_{interval} tablosu bulunamadı, şimdi oluşturuluyor...")
+        db.create_candles_table(interval)
+        db.create_fractals_table(interval)
+        db.conn.commit()
+        print(f"✅ candles_{interval} ve fractal_{interval} tabloları oluşturuldu.")
+    finally:
+        cur.close()
+        db.close()
 
 def truncate_fraktal_ve_liquidity_tablolari(interval):
     db = DatabaseManager(config.db_config)
@@ -101,13 +112,28 @@ def fetch_and_store(symbol, interval, start_str, end_str):
 
 def call_detect_fractals(symbol, tf, n=2, start_str=None, end_str=None):
     db = DatabaseManager(config.db_config)
+
+    # Eğer tablo yoksa dinamik olarak oluştur
+    try:
+        db.create_candles_table(tf)
+        db.create_fractals_table(tf)
+    except Exception as e:
+        print(f"Tablo oluşturma hatası: {e}")
+
     with db.conn.cursor() as cur:
-        cur.execute(f"""
-            SELECT open_time, open, high, low, close, volume, close_time 
-            FROM candles_{tf}
-            WHERE symbol = %s AND open_time >= %s AND open_time < %s
-            ORDER BY open_time
-        """, (symbol, start_str, end_str))
+        try:
+            cur.execute(f"""
+                SELECT open_time, open, high, low, close, volume, close_time 
+                FROM candles_{tf}
+                WHERE symbol = %s AND open_time >= %s AND open_time < %s
+                ORDER BY open_time
+            """, (symbol, start_str, end_str))
+        except Exception as e:
+            db.conn.rollback()
+            print(f"SQL hatası: {e}")
+            db.close()
+            return
+
         candles = [
             {
                 'open_time': row[0],
@@ -127,7 +153,7 @@ def call_detect_fractals(symbol, tf, n=2, start_str=None, end_str=None):
         print("‼️ UYARI: Candles listesinde duplicate (tekrar eden zaman) var!")
     missing = []
     for i in range(1, len(times)):
-        if (times[i] - times[i-1]).total_seconds() > 60*15:
+        if (times[i] - times[i-1]).total_seconds() > 60 * 15:
             missing.append((times[i-1], times[i]))
     if missing:
         print("‼️ UYARI: Eksik mum aralıkları:", missing)
@@ -412,8 +438,8 @@ def full_gridsearch(trade_logs, start_str, end_str):
                 print(f"{i}: liq_candle_time={log.get('liq_candle_time')}, trend_1h={log.get('trend_1h')}, status={log.get('status')}")
 
 if __name__ == "__main__":
-    start_str = "2025-10-30 00:00:00"
-    end_str   = "2025-11-07 00:00:00"
+    start_str = "2025-11-10 00:00:00"
+    end_str   = "2025-11-20 00:00:00"
     chunk_list = get_chunks(start_str, end_str, chunk_days=90, overlap_days=1)
     print(f"Chunk listesi: {chunk_list}")
     for i, (chunk_start, chunk_end) in enumerate(chunk_list, 1):

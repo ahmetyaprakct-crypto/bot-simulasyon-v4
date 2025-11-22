@@ -50,10 +50,13 @@ class DatabaseManager:
                     symbol TEXT NOT NULL,
                     fractal_time TIMESTAMP NOT NULL,
                     fractal_type TEXT CHECK (fractal_type IN ('UP', 'DOWN')),
-                    price NUMERIC
+                    price NUMERIC,
+                    candle_high NUMERIC,
+                    candle_low NUMERIC
                 );
             """)
             self.conn.commit()
+
 
     def create_open_liquidity_table(self):
         with self.conn.cursor() as cur:
